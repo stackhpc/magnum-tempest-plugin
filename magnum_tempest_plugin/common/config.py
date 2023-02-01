@@ -158,6 +158,14 @@ class Config(object):
         cls.cluster_creation_timeout = CONF.magnum.cluster_creation_timeout
 
     @classmethod
+    def set_master_lb_enabled(cls, config):
+        cls.master_lb_enabled = CONF.magnum.master_lb_enabled
+
+    @classmethod
+    def set_labels(cls, config):
+        cls.labels = CONF.magnum.labels
+
+    @classmethod
     def setUp(cls):
         cls.set_admin_creds(config)
         cls.set_user_creds(config)
@@ -180,3 +188,5 @@ class Config(object):
         cls.set_network_driver(config)
         cls.set_cluster_template_id(config)
         cls.set_cluster_creation_timeout(config)
+        cls.set_master_lb_enabled(config)
+        cls.set_labels(config)

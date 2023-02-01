@@ -45,7 +45,7 @@ mkdir -p $LOG_PATH
 cat /proc/cpuinfo > /opt/stack/logs/cpuinfo.log
 
 if [[ "$COE" == "kubernetes" ]]; then
-    SSH_USER=fedora
+    SSH_USER=ubuntu
     remote_exec $SSH_USER "sudo systemctl --full list-units --no-pager" systemctl_list_units.log
     remote_exec $SSH_USER "sudo journalctl -u cloud-config --no-pager" cloud-config.log
     remote_exec $SSH_USER "sudo journalctl -u cloud-final --no-pager" cloud-final.log
@@ -96,7 +96,7 @@ if [[ "$COE" == "kubernetes" ]]; then
     remote_exec $SSH_USER "sudo cat /etc/systemd/system/flannel-docker-bridge.service" flannel-docker-bridge.service
     remote_exec $SSH_USER "sudo cat /etc/systemd/system/flannel-config.service" flannel-config.service
 elif [[ "$COE" == "swarm" || "$COE" == "swarm-mode" ]]; then
-    SSH_USER=fedora
+    SSH_USER=ubuntu
     remote_exec $SSH_USER "sudo systemctl --full list-units --no-pager" systemctl_list_units.log
     remote_exec $SSH_USER "sudo journalctl -u cloud-config --no-pager" cloud-config.log
     remote_exec $SSH_USER "sudo journalctl -u cloud-final --no-pager" cloud-final.log

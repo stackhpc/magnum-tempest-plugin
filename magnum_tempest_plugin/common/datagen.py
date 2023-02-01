@@ -115,14 +115,15 @@ def cluster_template_data(**kwargs):
         "tls_disabled": False,
         "network_driver": None,
         "volume_driver": None,
-        "labels": {},
+        "labels": config.Config.labels,
         "public": False,
         "dns_nameserver": "8.8.8.8",
         "flavor_id": data_utils.rand_name('cluster'),
         "master_flavor_id": data_utils.rand_name('cluster'),
         "external_network_id": config.Config.nic_id,
         "keypair_id": data_utils.rand_name('cluster'),
-        "image_id": data_utils.rand_name('cluster')
+        "image_id": data_utils.rand_name('cluster'),
+        "master_lb_enabled": config.Config.master_lb_enabled
     }
 
     data.update(kwargs)
@@ -270,8 +271,10 @@ def valid_cluster_template(is_public=False):
         external_network_id=config.Config.nic_id,
         http_proxy=None, https_proxy=None,
         no_proxy=None, network_driver=config.Config.network_driver,
-        volume_driver=None, labels={},
+        volume_driver=None,
+        labels=config.Config.labels,
         docker_storage_driver=config.Config.docker_storage_driver,
+        master_lb_enabled=config.Config.master_lb_enabled,
         tls_disabled=False)
 
 

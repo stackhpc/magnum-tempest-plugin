@@ -1,0 +1,12 @@
+#!/bin/bash
+set -x 
+mkdir -p sonobuoy
+pushd sonobuoy
+echo "$1" > ./KUBECONFIG
+wget https://github.com/vmware-tanzu/sonobuoy/releases/download/v0.56.12/sonobuoy_0.56.12_linux_amd64.tar.gz
+tar -xf sonobuoy_0.56.12_linux_amd64.tar.gz
+./sonobuoy run --mode quick --wait --kubeconfig $(pwd)/KUBECONFIG
+exit_code=$?
+popd
+rm -rf sonobuoy/
+exit $exit_code

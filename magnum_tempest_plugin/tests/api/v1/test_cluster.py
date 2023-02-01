@@ -11,8 +11,13 @@
 # under the License.
 
 import fixtures
+import subprocess
+import yaml
 
+from kubernetes import client as kube_client
+from kubernetes import config as kube_config
 from oslo_log import log as logging
+from oslo_serialization import base64
 from oslo_utils import uuidutils
 from tempest.lib.common.utils import data_utils
 from tempest.lib import decorators
@@ -21,6 +26,7 @@ import testtools
 
 from magnum_tempest_plugin.common import config
 from magnum_tempest_plugin.common import datagen
+from magnum_tempest_plugin.common import utils
 from magnum_tempest_plugin.tests.api import base
 
 
@@ -34,59 +40,48 @@ class ClusterTest(base.BaseTempestTest):
     """Tests for cluster CRUD."""
 
     LOG = logging.getLogger(__name__)
+
+    LOG.setLevel(logging.DEBUG)
+
     delete_template = False
 
     def __init__(self, *args, **kwargs):
         super(ClusterTest, self).__init__(*args, **kwargs)
         self.clusters = []
 
-    @classmethod
-    def setUpClass(cls):
-        super(ClusterTest, cls).setUpClass()
+    def setUp(self):
+        super(ClusterTest, self).setUp()
 
         try:
-            (cls.creds, cls.keypair) = cls.get_credentials_with_keypair(
+            (self.creds, self.keypair) = self.get_credentials_with_keypair(
                 type_of_creds='default'
             )
-            (cls.cluster_template_client,
-             cls.keypairs_client) = cls.get_clients_with_existing_creds(
-                creds=cls.creds,
+            (self.cluster_template_client,
+             self.keypairs_client) = self.get_clients_with_existing_creds(
+                creds=self.creds,
                 type_of_creds='default',
                 request_type='cluster_template'
             )
-            (cls.cluster_client, _) = cls.get_clients_with_existing_creds(
-                creds=cls.creds,
+            (self.cluster_client, _) = self.get_clients_with_existing_creds(
+                creds=self.creds,
                 type_of_creds='default',
                 request_type='cluster'
             )
-            (cls.cert_client, _) = cls.get_clients_with_existing_creds(
-                creds=cls.creds,
+            (self.cert_client, _) = self.get_clients_with_existing_creds(
+                creds=self.creds,
                 type_of_creds='default',
                 request_type='cert'
             )
 
             if config.Config.cluster_template_id:
-                _, cls.cluster_template = cls.cluster_template_client.\
+                _, self.cluster_template = self.cluster_template_client.\
                     get_cluster_template(config.Config.cluster_template_id)
             else:
                 model = datagen.valid_cluster_template()
-                _, cls.cluster_template = cls._create_cluster_template(model)
-                cls.delete_template = True
+                _, self.cluster_template = self._create_cluster_template(model)
+                self.delete_template = True
         except Exception:
             raise
-
-    @classmethod
-    def tearDownClass(cls):
-        if cls.delete_template:
-            cls._delete_cluster_template(cls.cluster_template.uuid)
-
-        if config.Config.keypair_name:
-            cls.keypairs_client.delete_keypair(config.Config.keypair_name)
-
-        super(ClusterTest, cls).tearDownClass()
-
-    def setUp(self):
-        super(ClusterTest, self).setUp()
 
         # NOTE (dimtruck) by default tempest sets timeout to 20 mins.
         # We need more time.
@@ -99,20 +94,24 @@ class ClusterTest(base.BaseTempestTest):
             for cluster_id in cluster_list:
                 self._delete_cluster(cluster_id)
                 self.clusters.remove(cluster_id)
+
+            if self.delete_template:
+                self._delete_cluster_template(self.cluster_template.uuid)
+
+            if config.Config.keypair_name:
+                self.keypairs_client.delete_keypair(config.Config.keypair_name)
         finally:
             super(ClusterTest, self).tearDown()
 
-    @classmethod
-    def _create_cluster_template(cls, cm_model):
-        cls.LOG.debug('We will create a clustertemplate for %s', cm_model)
-        resp, model = cls.cluster_template_client.post_cluster_template(
+    def _create_cluster_template(self, cm_model):
+        self.LOG.debug('We will create a clustertemplate for %s', cm_model)
+        resp, model = self.cluster_template_client.post_cluster_template(
             cm_model)
         return resp, model
 
-    @classmethod
-    def _delete_cluster_template(cls, cm_id):
-        cls.LOG.debug('We will delete a clustertemplate for %s', cm_id)
-        resp, model = cls.cluster_template_client.delete_cluster_template(
+    def _delete_cluster_template(self, cm_id):
+        self.LOG.debug('We will delete a clustertemplate for %s', cm_id)
+        resp, model = self.cluster_template_client.delete_cluster_template(
             cm_id)
         return resp, model
 
@@ -154,12 +153,26 @@ class ClusterTest(base.BaseTempestTest):
         resp, model = self.cluster_client.get_cluster(cluster_id)
         return resp, model
 
+    # def test_create_delete_cluster(self):
+
+    #     model = datagen.valid_cluster_template()
+    #     _, cluster_template = self._create_cluster_template(model)
+    #     gen_model = datagen.valid_cluster_data(
+    #         cluster_template_id=cluster_template.uuid, node_count=1)
+    #     _, cluster_model = self._create_cluster(gen_model)
+
+    #     self._delete_cluster(cluster_model.uuid)
+    #     self.clusters.remove(cluster_model.uuid)
+
+    #     self._delete_cluster_template(cluster_template.uuid)
+
     # (dimtruck) Combining all these tests in one because
     # they time out on the gate (2 hours not enough)
     @testtools.testcase.attr('positive')
     @testtools.testcase.attr('slow')
     @decorators.idempotent_id('44158a8c-a856-11e9-9382-00224d6b7bc1')
     def test_create_list_sign_delete_clusters(self):
+
         gen_model = datagen.valid_cluster_data(
             cluster_template_id=self.cluster_template.uuid, node_count=1)
 
@@ -282,3 +295,88 @@ Q0uA0aVog3f5iJxCa3Hp5gxbJQ6zV6kJ0TEsuaaOhEko9sdpCoPOnRBm2i/XRD2D
         self.assertRaises(
             exceptions.NotFound,
             self.cluster_client.delete_cluster, data_utils.rand_uuid())
+
+    @testtools.testcase.attr('positive')
+    @decorators.idempotent_id('f4c33092-7eeb-43d7-826e-bba16fd61e28')
+    def test_create_cluster_and_get_kubeconfig(self):
+
+        gen_model = datagen.valid_cluster_data(
+            cluster_template_id=self.cluster_template.uuid, node_count=2)
+
+        # test cluster create
+        _, cluster_model = self._create_cluster(gen_model)
+        self.assertNotIn('status', cluster_model)
+
+        _, cluster_model = self._get_cluster_by_id(cluster_model.uuid)
+
+        # template kubeconfig
+
+        # generate csr and private key
+        csr_sample = utils.generate_csr_and_key()
+
+        # get CA cert
+        _, ca = self.cert_client.get_cert(cluster_model.uuid,
+                                          headers=HEADERS)
+        # sign CSR
+        cert_data_model = datagen.cert_data(cluster_model.uuid,
+                                            csr_data=csr_sample['csr'])
+
+        resp, cert_model = self.cert_client.post_cert(cert_data_model,
+                                                      headers=HEADERS)
+        cfg = """
+---
+apiVersion: v1
+clusters:
+  - cluster:
+      certificate-authority-data: {ca}
+      server: {api_address}
+    name: {name}
+contexts:
+  - context:
+      cluster: {name}
+      user: admin
+    name: default
+current-context: default
+kind: Config
+preferences: {{}}
+users:
+  - name: admin
+    user:
+      client-certificate-data: {cert}
+      client-key-data: {key}
+""".format(name=cluster_model.name,
+           api_address=cluster_model.api_address,
+           key=base64.encode_as_text(csr_sample['key']),
+           cert=base64.encode_as_text(cert_model.pem),
+           ca=base64.encode_as_text(ca.pem))
+
+        cfg = yaml.safe_load(cfg)
+
+        self.LOG.info("Generated kubeconfig: %s", cfg)
+
+        kube_config.load_kube_config_from_dict(cfg)
+
+        v1 = kube_client.CoreV1Api()
+
+        resp = v1.list_node(pretty="true")
+
+        self.LOG.info("LIST NODES: %s", resp)
+
+        self.LOG.info("Running sonobuoy on created cluster...")
+
+        # TODO(johng): add config for sonoboy path,
+        # and install in magnum devstack pluigin
+        process = subprocess.Popen(
+            ["run-sonobuoy", str(cfg)], stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT)
+        with process.stdout:
+            utils.log_subprocess_output(process.stdout, self.LOG)
+        exitcode = process.wait()
+
+        if exitcode != 0:
+            self.LOG.error("sonobuoy process exited with status %s", exitcode)
+        self.assertEqual(0, exitcode)
+
+        # test cluster delete
+        self._delete_cluster(cluster_model.uuid)
+        self.clusters.remove(cluster_model.uuid)
