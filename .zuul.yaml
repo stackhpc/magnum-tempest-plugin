@@ -5,13 +5,18 @@
       - tempest-plugin-jobs
     check:
       jobs:
-        - magnum-tempest-plugin-tests-api
-        - magnum-tempest-plugin-tests-api-zed
-        - magnum-tempest-plugin-tests-api-yoga
-        - magnum-tempest-plugin-tests-api-xena
+        #- magnum-tempest-plugin-tests-api
+        #- magnum-tempest-plugin-tests-api-zed
+        #- magnum-tempest-plugin-tests-api-yoga
+        #- magnum-tempest-plugin-tests-api-xena
+        #- magnum-tempest-plugin-tests-capi
+        #- magnum-tempest-plugin-tests-heat
+        - magnum-tempest-test-two-node
+
     gate:
       jobs:
         - magnum-tempest-plugin-tests-api
+        - magnum-tempest-plugin-tests-capi
 
 - job:
     name: magnum-tempest-plugin-tests-api-zed
@@ -32,48 +37,102 @@
     override-checkout: stable/xena
 
 - job:
+    name: magnum-tempest-plugin-tests-api-legacy
+    parent: magnum-tempest-plugin-tests-api
+    vars:
+      devstack_localrc:
+        MAGNUM_GUEST_IMAGE_URL: https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/31.20200323.3.2/x86_64/fedora-coreos-31.20200323.3.2-openstack.x86_64.qcow2.xz
+        MAGNUM_IMAGE_NAME: fedora-coreos-31.20200323.3.2-openstack.x86_64
+      devstack_local_conf:
+        test-config:
+          $TEMPEST_CONFIG:
+            image_id: fedora-coreos-31.20200323.3.2-openstack.x86_64
+            labels:
+            network_driver:
+
+- job:
+    name: magnum-tempest-plugin-tests-capi
+    parent: magnum-tempest-plugin-tests-api
+    vars:
+      tempest_test_regex: test_create_cluster_and_get_kubeconfig
+      tempest_exclude_regex:
+      zuul_copy_output:
+          './capi-kube.log': logs
+    post-run: playbooks/collect-capi-logs.yaml
+
+- job:
     name: magnum-tempest-plugin-tests-api
     parent: magnum-tempest-plugin-base
     vars:
       tox_envlist: all
       tempest_test_regex: ^magnum_tempest_plugin.tests.api
-      tempest_exclude_regex: (test_create_list_sign_delete_clusters|test_create_cluster_with_zero_nodes)
-      devstack_local_conf:
-        test-config:
-          $TEMPEST_CONFIG:
-            magnum:
-              image_id: fedora-coreos-31.20200323.3.2-openstack.x86_64
-              nic_id: public
-              keypair_id: default
-              flavor_id: ds2G
-              master_flavor_id: ds2G
-              copy_logs: true
-      devstack_localrc:
-        # NOTE: extend default glance limit from 1GB
-        GLANCE_LIMIT_IMAGE_SIZE_TOTAL: 5000
+      tempest_exclude_regex: (test_create_list_sign_delete_clusters|test_create_cluster_with_zero_nodes|test_create_cluster_and_get_kubeconfig)
+    host-vars:
+      controller:
+        devstack_local_conf:
+          test-config:
+            $TEMPEST_CONFIG:
+              magnum:
+                image_id: ubuntu-2004-kube-v1.25.5
+                nic_id: public
+                keypair_id: default
+                flavor_id: ds2G20
+                master_flavor_id: ds2G20
+                labels: kube_tag:v1.25.5
+                cluster_creation_timeout: 5
+                network_driver: flannel
+                copy_logs: true
+              auth:
+                tempest_roles: creator, member, load-balancer_admin
+        devstack_localrc:
+          # NOTE: extend default glance limit from 1GB
+          GLANCE_LIMIT_IMAGE_SIZE_TOTAL: 5000
+        zuul_copy_output:
+          '/var/log/dib-build' : logs
+          '/var/log/octavia-amphora.log': logs
+          '/var/log/octavia-tenant-traffic.log': logs
 
 - job:
-    name: magnum-tempest-plugin-base
+    name: magnum-tempest-plugin-base-yaya
+    nodeset: magnum-two-node
     description: |
       Magnum functional tests base layer
-    parent: devstack-tempest
+    parent: devstack-tempest #tempest-multinode-full-py3
     required-projects:
       - openstack/magnum
       - openstack/python-magnumclient
       - openstack/heat
       - openstack/barbican
       - openstack/magnum-tempest-plugin
+      - openstack/octavia
+      - openstack/octavia-lib
+      - openstack/diskimage-builder
+    roles:
+      - zuul: opendev.org/openstack/openstack-zuul-jobs
+      - zuul: opendev.org/openstack/devstack
+      - zuul: opendev.org/openstack/tempest
+      - zuul: opendev.org/openstack/neutron-tempest-plugin
     vars:
       tempest_plugins:
         - magnum-tempest-plugin
+      configure_swap_size: 8192
       devstack_localrc:
+        DIB_LOCAL_ELEMENTS: openstack-ci-mirrors
+        LIBVIRT_TYPE: kvm
+        LIBVIRT_CPU_MODE: host-passthrough
         USE_PYTHON3: true
-        MAGNUM_GUEST_IMAGE_URL: https://builds.coreos.fedoraproject.org/prod/streams/stable/builds/31.20200323.3.2/x86_64/fedora-coreos-31.20200323.3.2-openstack.x86_64.qcow2.xz
-        MAGNUM_IMAGE_NAME: fedora-coreos-31.20200323.3.2-openstack.x86_64
+        MAGNUM_GUEST_IMAGE_URL: https://minio.services.osism.tech/openstack-k8s-capi-images/ubuntu-2004-kube-v1.25/ubuntu-2004-kube-v1.25.5.qcow2
+        MAGNUM_IMAGE_NAME: ubuntu-2004-kube-v1.25.5
+        FORCE_CONFIG_DRIVE: false
+        NOVA_ALLOW_MOVE_TO_SAME_HOST: false
+        LIVE_MIGRATION_AVAILABLE: true
+        USE_BLOCK_MIGRATION_FOR_LIVE_MIGRATION: true
       devstack_plugins:
         magnum: https://opendev.org/openstack/magnum
         heat: https://opendev.org/openstack/heat
+        neutron: https://opendev.org/openstack/neutron
         barbican: https://opendev.org/openstack/barbican
+        octavia: https://opendev.org/openstack/octavia
       devstack_services:
         # Disable swift and dependent c-bak service to support upload of .qcow2.xz image in the gate
         s-account: false
@@ -81,11 +140,406 @@
         s-object: false
         s-proxy: false
         c-bak: false
+        octavia: true
+        o-api: true
+        o-cw: true
+        o-hm: true
+        o-hk: true
+        o-da: true
+        neutron-trunk: true
+        br-ex-tcpdump: true
+        br-int-flows: true
+      tox_envlist: multinode
+    group-vars:
+      peers:
+        devstack_localrc:
+          NOVA_ALLOW_MOVE_TO_SAME_HOST: false
+          LIVE_MIGRATION_AVAILABLE: true
+          USE_BLOCK_MIGRATION_FOR_LIVE_MIGRATION: true
+    host-vars:
+      compute1:
+        devstack_localrc:
+          USE_PYTHON3: true
+          DATABASE_USER: octavia
+          DATABASE_PASSWORD: octavia_database_pw
+          RABBIT_PASSWORD: octavia_rabbit_pw
+          ADMIN_PASSWORD: octavia_admin_pw
+          SERVICE_PASSWORD: octavia_service_pw
+          NETWORK_GATEWAY: 10.1.0.1
+          FIXED_RANGE: 10.1.0.0/20
+          IPV4_ADDRS_SAFE_TO_USE: 10.1.0.0/20
+          FLOATING_RANGE: 172.24.5.0/24
+          PUBLIC_NETWORK_GATEWAY: 172.24.5.1
+          SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          HOST_IP: "{{ hostvars['compute1']['nodepool']['private_ipv4'] }}"
+        devstack_services:
+          br-ex-tcpdump: true
+          br-int-flows: true
+          magnum-api: false
+          magnum-cond: false
+          octavia: false
+          o-api: false
+          o-cw: false
+          o-hm: false
+          o-hk: false
+          o-da: false
+          barbican: false
+          barbican-svc: false
+          barbican-retry: false
+          barbican-keystone-listener: false
+          h-eng: false
+          h-api: false
+          h-api-cfn: false
+          tempest: false
+      controller:
+        devstack_localrc:
+          DATABASE_USER: octavia
+          DATABASE_PASSWORD: octavia_database_pw
+          RABBIT_PASSWORD: octavia_rabbit_pw
+          ADMIN_PASSWORD: octavia_admin_pw
+          SERVICE_PASSWORD: octavia_service_pw
+          NETWORK_GATEWAY: 10.1.0.1
+          FIXED_RANGE: 10.1.0.0/20
+          IPV4_ADDRS_SAFE_TO_USE: 10.1.0.0/20
+          FLOATING_RANGE: 172.24.5.0/24
+          PUBLIC_NETWORK_GATEWAY: 172.24.5.1
+          HOST_IP: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          NEUTRON_SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          DATABASE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          RABBIT_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          GLANCE_HOSTPORT: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}:9292"
+        devstack_local_conf:
+          post-config:
+            $OCTAVIA_CONF:
+              haproxy_amphora:
+                # Set these higher for non-nested virt nodepool instances
+                connection_max_retries: 1200
+                build_active_retries: 300
+              amphora_agent:
+                forward_all_logs: True
+
+- nodeset:
+    name: magnum-two-node
+    nodes:
+      - name: controller
+        label: nested-virt-ubuntu-focal
+      - name: compute
+        label: nested-virt-ubuntu-focal
+    groups:
+      - name: controller
+        nodes:
+          - controller
+      # Node where tests are executed and test results collected
+      - name: tempest
+        nodes:
+          - controller
+      # Nodes running the compute service
+      - name: compute
+        nodes:
+          - controller
+          - compute
+      # Nodes that are not the controller
+      - name: subnode
+        nodes:
+          - compute
+      # Switch node for multinode networking setup
+      - name: switch
+        nodes:
+          - controller
+      # Peer nodes for multinode networking setup
+      - name: peers
+        nodes:
+          - compute
+
+- job:
+    name: magnum-tempest-plugin-base
+    parent: devstack-tempest
+    timeout: 7800
+    required-projects:
+      - openstack/magnum
+      - openstack/python-magnumclient
+      - openstack/heat
+      - openstack/barbican
+      - openstack/magnum-tempest-plugin
+      - openstack/devstack
+      - openstack/octavia
+      - openstack/octavia-lib
+      - openstack/octavia-tempest-plugin
+      - openstack/python-octaviaclient
     irrelevant-files:
       - ^.*\.rst$
       - ^api-ref/.*$
       - ^doc/.*$
-      - ^specs/.*$
-      - ^install-guide/.*$
+      - ^etc/.*$
       - ^releasenotes/.*$
-      - ^dockerfiles/.*$
+    vars:
+      configure_swap_size: 8192
+      devstack_localrc:
+        USE_PYTHON3: true
+        LIBVIRT_TYPE: kvm
+        LIBVIRT_CPU_MODE: host-passthrough
+      devstack_local_conf:
+        post-config:
+          $OCTAVIA_CONF:
+            DEFAULT:
+              debug: True
+      devstack_services:
+        c-bak: false
+        ceilometer-acentral: false
+        ceilometer-acompute: false
+        ceilometer-alarm-evaluator: false
+        ceilometer-alarm-notifier: false
+        ceilometer-anotification: false
+        ceilometer-api: false
+        ceilometer-collector: false
+        c-sch: false
+        c-api: false
+        c-vol: false
+        cinder: false
+        octavia: true
+        o-api: true
+        o-cw: true
+        o-hm: true
+        o-hk: true
+        swift: false
+        s-account: false
+        s-container: false
+        s-object: false
+        s-proxy: false
+        tempest: true
+      devstack_plugins:
+        octavia: https://opendev.org/openstack/octavia.git
+        octavia-tempest-plugin: https://opendev.org/openstack/octavia-tempest-plugin.git
+        neutron: https://opendev.org/openstack/neutron.git
+      tempest_plugins:
+        - octavia-tempest-plugin
+- job:
+    name: magnum-tempest-plugin-two-node-base
+    parent: magnum-tempest-plugin-base
+    nodeset: magnum-two-node
+    timeout: 10800
+    required-projects:
+      - openstack/magnum
+      - openstack/python-magnumclient
+      - openstack/heat
+      - openstack/barbican
+      - openstack/magnum-tempest-plugin
+      - openstack/octavia
+      - openstack/octavia-lib
+      - openstack/diskimage-builder
+    roles:
+      - zuul: openstack/neutron-tempest-plugin
+    pre-run: playbooks/multinode-pre.yaml
+    vars:
+      zuul_copy_output:
+        '/var/log/dib-build': logs
+        '/var/log/octavia-amphora.log': logs
+        '/var/log/octavia-tenant-traffic.log': logs
+        './capi-kube.log': logs
+    post-run: playbooks/collect-capi-logs.yaml
+    host-vars:
+      controller:
+        configure_swap_size: 8192
+        devstack_localrc:
+          # From devstack "vars:"
+          DATABASE_USER: octavia
+          DATABASE_PASSWORD: octavia_database_pw
+          RABBIT_PASSWORD: octavia_rabbit_pw
+          ADMIN_PASSWORD: octavia_admin_pw
+          SERVICE_PASSWORD: octavia_service_pw
+          NETWORK_GATEWAY: 10.1.0.1
+          FIXED_RANGE: 10.1.0.0/20
+          IPV4_ADDRS_SAFE_TO_USE: 10.1.0.0/20
+          FLOATING_RANGE: 172.24.5.0/24
+          PUBLIC_NETWORK_GATEWAY: 172.24.5.1
+          LOGFILE: /opt/stack/logs/devstacklog.txt
+          LOG_COLOR: false
+          VERBOSE: true
+          VERBOSE_NO_TIMESTAMP: true
+          NOVNC_FROM_PACKAGE: true
+          ERROR_ON_CLONE: true
+          MULTI_HOST: 1
+          SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          HOST_IP: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          USE_PYTHON3: true
+          LIBVIRT_TYPE: kvm
+          LIBVIRT_CPU_MODE: host-passthrough
+          # Octavia specific settings
+          #OCTAVIA_CONTROLLER_IP_PORT_LIST: 192.168.0.3:5555,192.168.0.4:5555
+          OCTAVIA_CONTROLLER_IP_PORT_LIST: 192.168.0.3:5555
+          OCTAVIA_MGMT_PORT_IP: 192.168.0.3
+          OCTAVIA_NODE: main
+          #OCTAVIA_NODES: "main:{{ hostvars['controller']['nodepool']['private_ipv4'] }},second:{{ hostvars['compute']['nodepool']['private_ipv4'] }}"
+          OCTAVIA_NODES: "main:{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          OCTAVIA_USE_PREGENERATED_CERTS: true
+          MAGNUM_GUEST_IMAGE_URL: https://object.arcus.openstack.hpc.cam.ac.uk/swift/v1/AUTH_f0dc9cb312144d0aa44037c9149d2513/azimuth-images-prerelease/ubuntu-focal-kube-v1.26.3-230411-1504.qcow2
+          MAGNUM_IMAGE_NAME: ubuntu-focal-kube-v1.26.3-230411-1504
+          MAGNUM_IMAGE_KUBE_VERSION: v1.26.3
+          # We need more than 1GB of images in glance
+          GLANCE_LIMIT_IMAGE_SIZE_TOTAL: 10000
+        devstack_plugins:
+          neutron: https://opendev.org/openstack/neutron.git
+          octavia: https://opendev.org/openstack/octavia.git
+          magnum: https://opendev.org/openstack/magnum
+          heat: https://opendev.org/openstack/heat
+          barbican: https://opendev.org/openstack/barbican
+        tempest_plugins:
+          - octavia-tempest-plugin
+          - magnum-tempest-plugin
+      compute:
+        configure_swap_size: 8192
+        devstack_localrc:
+          # From devstack "vars:"
+          DATABASE_USER: octavia
+          DATABASE_PASSWORD: octavia_database_pw
+          RABBIT_PASSWORD: octavia_rabbit_pw
+          ADMIN_PASSWORD: octavia_admin_pw
+          SERVICE_PASSWORD: octavia_service_pw
+          NETWORK_GATEWAY: 10.1.0.1
+          FIXED_RANGE: 10.1.0.0/20
+          IPV4_ADDRS_SAFE_TO_USE: 10.1.0.0/20
+          FLOATING_RANGE: 172.24.5.0/24
+          PUBLIC_NETWORK_GATEWAY: 172.24.5.1
+          LOGFILE: /opt/stack/logs/devstacklog.txt
+          LOG_COLOR: false
+          VERBOSE: true
+          VERBOSE_NO_TIMESTAMP: true
+          NOVNC_FROM_PACKAGE: true
+          ERROR_ON_CLONE: true
+          MULTI_HOST: 1
+          HOST_IP: "{{ hostvars['compute']['nodepool']['private_ipv4'] }}"
+          SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          NEUTRON_SERVICE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          DATABASE_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          RABBIT_HOST: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}"
+          GLANCE_HOSTPORT: "{{ hostvars['controller']['nodepool']['private_ipv4'] }}:9292"
+          USE_PYTHON3: true
+          LIBVIRT_TYPE: kvm
+          LIBVIRT_CPU_MODE: host-passthrough
+        devstack_plugins:
+          neutron: https://opendev.org/openstack/neutron.git
+    group-vars:
+      controller:
+        devstack_local_conf:
+          post-config:
+            $OCTAVIA_CONF:
+              DEFAULT:
+                debug: True
+              api_settings:
+                api_v1_enabled: False
+              amphora_agent:
+                forward_all_logs: True
+            "/$NEUTRON_CORE_PLUGIN_CONF":
+              ovn:
+                enable_distributed_floating_ip: True
+        devstack_services:
+          base: false
+          barbican: true
+          dstat: true
+          g-api: true
+          g-reg: true
+          key: true
+          memory_tracker: true
+          mysql: true
+          n-api: true
+          n-api-meta: true
+          n-cauth: true
+          n-cond: true
+          n-cpu: false
+          n-obj: true
+          n-sch: true
+          neutron-qos: true
+          octavia: true
+          o-api-ha: true
+          o-api: true
+          o-cw: true
+          o-hm: true
+          o-hk: true
+          ovn-controller: true
+          ovn-northd: true
+          ovn-vswitchd: true
+          ovsdb-server: true
+          placement-api: true
+          q-agt: false
+          q-dhcp: false
+          q-l3: false
+          q-meta: false
+          q-ovn-metadata-agent: true
+          q-svc: true
+          rabbit: true
+          tempest: true
+          tls-proxy: true
+          magnum-api: true
+          magnum-cond: true
+      subnode:
+        devstack_local_conf:
+          post-config:
+            $OCTAVIA_CONF:
+              DEFAULT:
+                debug: True
+              api_settings:
+                api_v1_enabled: False
+              amphora_agent:
+                forward_all_logs: True
+            "/$NEUTRON_CORE_PLUGIN_CONF":
+              ovn:
+                enable_distributed_floating_ip: True
+        devstack_services:
+          c-vol: false
+          c-bak: false
+          ovn-controller: true
+          ovn-northd: false
+          ovn-vswitchd: true
+          ovsdb-server: true
+          q-fake: true
+          q-agt: false
+          q-dhcp: false
+          q-l3: false
+          q-meta: false
+          q-ovn-metadata-agent: true
+          magnum-api: false
+          magnum-cond: false
+          barbican: false
+          barbican-svc: false
+          barbican-retry: false
+          barbican-keystone-listener: false
+
+- job:
+    name: magnum-tempest-test-two-node
+    parent: magnum-tempest-plugin-two-node-base
+    group-vars:
+      controller:
+        tempest_concurrency: 1
+        tempest_test_regex: ^magnum_tempest_plugin.tests.api
+        tempest_exclude_regex: test_create_cluster_with_zero_nodes
+        tox_envlist: all
+        devstack_local_conf:
+          post-config:
+            $OCTAVIA_CONF:
+              controller_worker:
+                loadbalancer_topology: SINGLE
+          test-config:
+            "$TEMPEST_CONFIG":
+              load_balancer:
+                loadbalancer_topology: SINGLE
+              magnum:
+                image_id: ubuntu-focal-kube-v1.26.3-230411-1504
+                nic_id: public
+                keypair_id: default
+                flavor_id: ds2G20
+                master_flavor_id: ds2G20
+                # ovn seems to need this for DNS to work
+                labels: dns_nameserver:8.8.8.8
+                cluster_creation_timeout: 8
+                network_driver: flannel
+                # put this to true once it works!
+                copy_logs: false
+              auth:
+                tempest_roles: creator, member, load-balancer_member
+      subnode:
+        devstack_local_conf:
+          post-config:
+            $OCTAVIA_CONF:
+              controller_worker:
+                loadbalancer_topology: SINGLE

@@ -68,4 +68,10 @@ MagnumGroup = [
                default=30,
                help="Timeout(in minutes) to wait for the cluster creation "
                     "finished."),
+    cfg.BoolOpt("master-lb-enabled",
+                default=True,
+                help="Indicates whether created Clusters should have a load \
+                      balancer for master nodes or not."),
+    cfg.DictOpt("labels",
+                default={}),
 ]

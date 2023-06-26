@@ -1,0 +1,10 @@
+- hosts: tempest
+  tasks:
+    - name: Collect capi logs and pipe to file
+      shell: >
+        kubectl -n capo-system logs deploy/capo-controller-manager \
+        --kubeconfig /opt/stack/kubeconfig > ./capi-kube.log
+      args:
+        executable: /bin/bash
+      environment:
+        KUBECONFIG: /home/ubuntu/.kube/config
